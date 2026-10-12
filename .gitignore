@@ -1,0 +1,18 @@
+# Elektron firmware and anything derived from it is not ours to keep in
+# history: the OS files and the archives they came in, extracted sections,
+# snapshots, card images and trace logs.
+*.syx
+*.zip
+fw/
+sections/
+snapshots/
+*.snap
+*.img
+*.log
+
+# build output and local tool state
+target/
+__pycache__/
+.omc/
+.codex/
+.DS_Store

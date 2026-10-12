@@ -1,0 +1,36 @@
+#!/bin/sh
+# Refuses a commit that carries Elektron firmware or something made from it
+# (see AGENTS.md). Enable once per clone: git config core.hooksPath .githooks
+bad=0
+refuse() { echo "pre-commit: refusing $1: $2" >&2; bad=1; }
+
+git diff --cached --name-only --diff-filter=ACMR -z | tr '\0' '\n' > "${TMPDIR:-/tmp}/precommit.$$"
+while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    case "$f" in
+        *.syx|*.SYX|*.zip|*.img|*.snap|*.bin|*.log) refuse "$f" "firmware, card image, dump or log by name" ;;
+        fw/*|*/fw/*|sections/*|*/sections/*|snapshots/*|*/snapshots/*) refuse "$f" "a firmware directory" ;;
+    esac
+    # A SysEx dump from Elektron starts f0 00 20 3c.
+    magic=$(git cat-file blob ":$f" | head -c 4 | od -An -tx1 | tr -d ' \n')
+    [ "$magic" = "f000203c" ] && refuse "$f" "an Elektron SysEx file by content"
+    size=$(git cat-file -s ":$f")
+    # Screenshots and recordings are welcome, if they are what their name says.
+    limit=262144
+    case "$f" in
+        *.png) want=89504e47 ;;
+        *.jpg|*.jpeg) want=ffd8ff ;;
+        *.wav) want=52494646 ;;
+        *.flac) want=664c6143 ;;
+        *.ogg) want=4f676753 ;;
+        *) want= ;;
+    esac
+    if [ -n "$want" ]; then
+        limit=8388608
+        case "$magic" in "$want"*) ;; *) refuse "$f" "not the picture or sound its name says" ;; esac
+    fi
+    [ "$size" -gt "$limit" ] && refuse "$f" "$size bytes: too large to commit here"
+done < "${TMPDIR:-/tmp}/precommit.$$"
+rm -f "${TMPDIR:-/tmp}/precommit.$$"
+
+[ "$bad" = 0 ] || { echo "pre-commit: see AGENTS.md, 'Firmware never enters git'." >&2; exit 1; }
