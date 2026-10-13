@@ -750,6 +750,33 @@ fn power_off(m: &mut Machine, o: &Opts) {
     }
 }
 
+/// Puts the machine's icon and class on the window. minifb sets no class hint
+/// and no icon on X11, so a taskbar shows a blank and cannot tell the machines
+/// apart. The icons are `_NET_WM_ICON` words (width, height, ARGB pixels per
+/// size, little-endian u32) drawn by elektremu-studio's icons/make_icons.py.
+#[cfg(target_os = "linux")]
+fn dress_window(win: &mut minifb::Window, name: &str, argb: &[u8]) {
+    use x11_dl::xlib;
+    let words: Vec<u64> = argb.chunks_exact(4).map(|w| u32::from_le_bytes([w[0], w[1], w[2], w[3]]) as u64).collect();
+    if let Ok(icon) = minifb::Icon::try_from(&words[..]) {
+        win.set_icon(icon);
+    }
+    let (Ok(x), Ok(name)) = (xlib::Xlib::open(), std::ffi::CString::new(name)) else { return };
+    // minifb keeps its display to itself; a second connection can set the hint.
+    unsafe {
+        let d = (x.XOpenDisplay)(std::ptr::null());
+        if d.is_null() {
+            return;
+        }
+        let mut hint = xlib::XClassHint { res_name: name.as_ptr() as *mut _, res_class: name.as_ptr() as *mut _ };
+        (x.XSetClassHint)(d, win.get_window_handle() as xlib::Window, &mut hint);
+        (x.XCloseDisplay)(d);
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn dress_window(_win: &mut minifb::Window, _name: &str, _argb: &[u8]) {}
+
 fn run_window(o: &Opts, tx: mpsc::Sender<Ev>, view: Arc<Mutex<View>>, _quit: Arc<AtomicBool>, places: &[gui::Place], cv: &mut Canvas) {
     use minifb::{Key, KeyRepeat, MouseButton, MouseMode, Window, WindowOptions};
     let title = if a4_window() { "a4-emu (dtemu)" } else { "rytm-emu (dtemu)" };
@@ -760,6 +787,14 @@ fn run_window(o: &Opts, tx: mpsc::Sender<Ev>, view: Arc<Mutex<View>>, _quit: Arc
             return;
         }
     };
+    let (class, icon): (&str, &[u8]) = if a4_window() {
+        ("a4-emu", include_bytes!("../assets/analog-four.argb"))
+    } else if view.lock().unwrap().rytm {
+        ("rytm-emu", include_bytes!("../assets/analog-rytm.argb"))
+    } else {
+        ("dtemu", include_bytes!("../assets/digitakt.argb"))
+    };
+    dress_window(&mut win, class, icon);
     win.set_target_fps(60);
     let mut held: Vec<u8> = Vec::new(); // momentary, under the mouse
     let mut latched: Vec<u8> = Vec::new();
